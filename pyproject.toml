@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toolbench-synthgen"
+version = "0.1.0"
+description = "Offline multi-agent tool-use conversation generator built on ToolBench tool schemas."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Your Name" }
+]
+dependencies = [
+  "typer>=0.12.0",
+  "mem0ai>=0.0.8",
+  "pydantic>=2.7.0",
+  "networkx>=3.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+toolbench-synthgen = "toolbench_synthgen.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["toolbench_synthgen*"]
+
