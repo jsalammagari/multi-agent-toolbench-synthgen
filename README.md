@@ -50,12 +50,22 @@ The `build` command expects a directory containing ToolBench-style tool JSON fil
 
 These artifacts will later be used by the sampler and multi-agent generator to propose realistic multi-step, multi-tool chains during dataset generation.
 
+## Offline Executor
+
+An offline executor will be used during conversation generation to:
+
+- Validate tool-call arguments against endpoint schemas from the Tool Registry.
+- Generate deterministic mock responses (no real API calls) that are structurally consistent and chainable.
+- Maintain a lightweight session state, so later tool calls can reference IDs or results produced earlier in the conversation.
+
+This executor and the shared conversation models are implemented in `toolbench_synthgen/executor/` and `toolbench_synthgen/models.py` and will be invoked by the multi-agent generator in later stories.
+
 ## Project Structure
 
 - `toolbench_synthgen/`
   - `registry/` – Tool registry models, loader, and query API for ToolBench definitions.
   - `graph/` – Tool graph representation and constructors built from the registry.
-  - `executor/` – Offline tool execution model (to be implemented).
+  - `executor/` – Offline tool execution model and argument validation.
   - `agents/` – Multi-agent conversation system (to be implemented).
   - `memory/` – `MemoryStore` abstraction backed by `mem0` (to be implemented).
   - `pipeline/` – Orchestration for build / generate / validate / metrics (to be implemented).

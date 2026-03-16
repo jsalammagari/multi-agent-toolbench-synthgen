@@ -12,7 +12,7 @@ This document outlines the planned architecture for the ToolBench-based offline 
   - `memory` – `MemoryStore` abstraction backed by `mem0` with `session` and `corpus` scopes.
   - `pipeline` – Orchestration for build / generate / validate / metrics commands.
 
-## Current Implementation (Stories 1–2)
+## Current Implementation (Stories 1–3)
 
 - Project is packaged via `pyproject.toml` with an installable `toolbench-synthgen` distribution.
 - Dependencies and development tools are listed in `requirements.txt`.
@@ -64,14 +64,50 @@ This document outlines the planned architecture for the ToolBench-based offline 
   - `ToolGraph.save(path)` writes a JSON representation containing node and edge lists.
   - The graph is deterministic for a given registry: running `build` with the same ToolBench input and config re-produces the same artifacts (modulo file timestamps).
 
-Future stories will fill in the remaining sections of this document:
+### Offline Execution Model
 
-- Architecture & major modules
-- Tool registry & graph design
-- Multi-agent system design
-- Agentic memory implementation and `memory_grounding_rate`
-- Offline executor design and chain consistency
-- Validation, metrics, and diversity analysis
+- **Data models**
+  - `Message`:
+    - `role`, `content`, optional `tool_call_id`.
+  - `ToolCall`:
+    - `id`, `endpoint_id`, `arguments`, `step_index`.
+  - `ToolOutput`:
+    - `id`, `tool_call_id`, structured `payload`, and any `derived_ids` (e.g., generated object IDs).
+  - `ConversationMetadata`:
+    - `seed`, `tool_ids_used`, `num_turns`, `num_clarification_questions`, `memory_grounding_rate`, `corpus_memory_enabled`, `pattern_type`, plus an extensible `extra` dict.
+  - `ConversationRecord`:
+    - `conversation_id`, `messages`, `tool_calls`, `tool_outputs`, `metadata`.
+  - All of the above are Pydantic models defined in `toolbench_synthgen/models.py` and serialize cleanly to/from JSON for the eventual JSONL dataset.
 
-At this point, only scaffolding & CLI are implemented; no tool ingestion, generation, or evaluation logic exists yet.
+- **Argument validation**
+  - `OfflineExecutor.validate_args(endpoint_id, arguments)`:
+    - Looks up the endpoint in `ToolRegistry`.
+    - Ensures all required parameters defined on the endpoint are present in `arguments`.
+    - Collects missing-parameter errors in a structured `errors` dict.
+    - Raises a `ValidationError` with `endpoint_id` and `errors` when validation fails.
+
+- **Deterministic mock responses**
+  - `OfflineExecutor.execute(endpoint_id, arguments, session_state, step_index)`:
+    - Runs `validate_args`; on validation failure:
+      - Returns a `ToolCall` and `ToolOutput` whose payload includes an `"error"` field containing the validation error details, without mutating `session_state`.
+    - On success:
+      - Uses a seeded RNG derived from the global `seed`, `endpoint_id`, and `arguments` to generate deterministic mock outputs.
+      - Produces a `ToolCall` and `ToolOutput` with a synthetic `result_id` and an `echo` of the input arguments.
+      - Same seed + same endpoint + same arguments → same `result_id` and payload, regardless of `step_index`.
+
+- **Session state and chaining**
+  - `session_state` is a simple dictionary maintained by the executor:
+    - `"objects"`: maps generated IDs (e.g., `result_id`) to their payloads.
+    - `"last_result"`: holds the most recent payload.
+  - After successful execution, the executor:
+    - Stores the payload under its `result_id` key in `session_state["objects"]`.
+    - Updates `session_state["last_result"]`.
+  - This enables later tool calls to reference earlier outputs by ID or via the last-result cache, without coupling the executor to any particular agent implementation.
+
+Future stories will build on this foundation:
+
+- Multi-agent system design and usage of the executor during generation.
+- Agentic memory implementation and `memory_grounding_rate`.
+- Validation, metrics, and diversity analysis.
+
 
