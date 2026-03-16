@@ -12,7 +12,7 @@ This document outlines the planned architecture for the ToolBench-based offline 
   - `memory` – `MemoryStore` abstraction backed by `mem0` with `session` and `corpus` scopes.
   - `pipeline` – Orchestration for build / generate / validate / metrics commands.
 
-## Current Implementation (Stories 1–3)
+## Current Implementation (Stories 1–5)
 
 - Project is packaged via `pyproject.toml` with an installable `toolbench-synthgen` distribution.
 - Dependencies and development tools are listed in `requirements.txt`.
@@ -149,9 +149,83 @@ Future stories will build on this foundation:
     - Using consistent scopes (`"session"`/`"corpus"`) and queries.
     - Treating non-empty vs empty search results as the key signal, rather than relying on exact ordering or scores.
 
-Future stories will integrate this memory layer with the multi-agent generator and metrics:
+## Multi-Agent System
 
-- Use session memory for grounding tool arguments within a conversation.
-- Use corpus memory for cross-conversation diversity and planning.
-- Compute `memory_grounding_rate` based on whether non-first tool calls included at least one retrieved memory entry in their argument prompts.
+### SamplerAgent
 
+- **Responsibility**: Propose candidate tool chains from the Tool Graph.
+- **Inputs**: `ToolGraph`, random seed.
+- **Behavior**:
+  - Selects endpoint nodes from the graph and samples a chain (currently sequential, length ≥ 3).
+  - Derives:
+    - `endpoint_ids`: ordered list of endpoint identifiers.
+    - `tools_used`: distinct tool IDs used in the chain.
+    - `pattern_type`: currently `"sequential"`, extensible to parallel/mixed.
+    - `tags`: any associated concept/tag metadata from tool nodes (used as a domain hint).
+
+### PlannerAgent
+
+- **Responsibility**: Turn a sampled tool chain into a conversation plan.
+- **Inputs**: `SampledToolChain`, optional corpus memory summaries, configuration/seed.
+- **Behavior**:
+  - Determines a domain (e.g., from chain tags) and constructs a user goal string.
+  - Uses corpus summaries to slightly diversify plans when similar pattern/domain combinations have been seen before.
+  - Produces a `ConversationPlan`:
+    - `goal` and `domain`.
+    - Ordered `PlanStep`s that alternate between:
+      - `kind="clarification"` steps (where the assistant should ask questions).
+      - `kind="tool_call"` steps referencing specific endpoint IDs.
+
+### UserProxyAgent
+
+- **Responsibility**: Simulate the user side of the interaction.
+- **Behavior**:
+  - Generates the initial user `Message` expressing the plan’s goal.
+  - Answers clarification questions with follow-up user messages, providing simple but usable parameter values (e.g., `lang="en"`), while tracking what has already been provided per endpoint.
+
+### AssistantAgent
+
+- **Responsibility**: Decide between asking clarifications and issuing tool calls, and execute tools via the OfflineExecutor.
+- **Inputs**: `OfflineExecutor`, `MemoryStore`, `AssistantConfig` (including `conversation_id`), current `ConversationRecord`, `PlanStep`, and session state.
+- **Behavior**:
+  - For `kind="clarification"` steps:
+    - Emits an assistant `Message` asking for missing details (e.g., language).
+  - For `kind="tool_call"` steps:
+    - Builds tool-call arguments based on conversation context (currently defaulting to `lang="en"`).
+    - For non-first tool calls, queries `MemoryStore.search(..., scope="session")`; when any prior tool outputs are retrieved, marks the arguments as `from_memory=True` to indicate that they are grounded in session memory.
+    - Calls `executor.execute(...)`:
+      - On `ValidationError`, turns errors into a clarifying `Message` instead of executing.
+      - On success:
+        - Appends resulting `ToolCall` and `ToolOutput` to the conversation.
+        - Writes the `ToolOutput` into session memory using `add_session_tool_output(...)`.
+        - Sends an assistant `Message` summarizing the tool result for the user.
+
+### ConversationValidatorAgent
+
+- **Responsibility**: Check structural and basic semantic properties of conversations.
+- **Behavior**:
+  - Ensures at least 3 tool calls (multi-step).
+  - Encourages use of ≥ 2 distinct tools where possible (multi-tool).
+  - Verifies that message roles are within an allowed set (`user`, `assistant`, `tool`).
+  - Performs a basic memory-grounding check:
+    - For non-first tool calls, expects arguments to include `from_memory=True`, indicating that the Assistant consulted session memory before forming the call.
+  - Returns a `ValidationResult` (`valid`, `reasons`), which is currently attached to `ConversationMetadata.extra` if invalid.
+
+### ConversationGeneratorCore
+
+- **Responsibility**: Orchestrate all agents to produce a single `ConversationRecord`.
+- **Inputs**: `ToolRegistry`, `ToolGraph`, `OfflineExecutor`, `MemoryStore`, and `ConversationGeneratorConfig` (`conversation_id`, `seed`, `corpus_memory_enabled`).
+- **Flow**:
+  1. **Corpus context** (if enabled): queries `MemoryStore.search(..., scope="corpus")` for prior summaries.
+  2. **Sampling**: `SamplerAgent` samples a tool chain from the graph.
+  3. **Planning**: `PlannerAgent` creates a `ConversationPlan` using the chain and any corpus context.
+  4. **Initial user**: `UserProxyAgent` emits the initial user request message.
+  5. **User–Assistant loop**:
+     - For each `PlanStep`:
+       - `AssistantAgent.handle_step(...)` produces assistant messages and, for tool-call steps, executes tools via the executor and writes outputs into **session memory**.
+       - For clarification steps, `UserProxyAgent` immediately responds with a follow-up user message.
+  6. **Metadata**: assembles `ConversationMetadata` (seed, tools used, num turns, num clarifications, pattern type, corpus_memory_enabled).
+  7. **Validation**: `ConversationValidatorAgent` validates the conversation; reasons are stored in `metadata.extra` when not fully valid.
+- **Memory usage**:
+  - Session memory (`scope="session"`) is updated after each successful tool call and is intended to be read by future steps for argument grounding.
+  - Corpus memory (`scope="corpus"`) is read before planning when enabled and will be written after conversations in the generation pipeline (next stories).
