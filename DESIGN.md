@@ -106,8 +106,52 @@ This document outlines the planned architecture for the ToolBench-based offline 
 
 Future stories will build on this foundation:
 
-- Multi-agent system design and usage of the executor during generation.
-- Agentic memory implementation and `memory_grounding_rate`.
-- Validation, metrics, and diversity analysis.
+## Agentic Memory
 
+- **MemoryStore abstraction**
+  - Implemented in `toolbench_synthgen/memory/store.py` and exposed via `toolbench_synthgen.memory`.
+  - Exact interface:
+    - `add(self, content: str, scope: str, metadata: dict) -> None`
+    - `search(self, query: str, scope: str, top_k: int = 5) -> list[dict]`
+  - Internally wraps `mem0.Memory`, passing `scope` as the `namespace` so that:
+    - `scope="session"` and `scope="corpus"` are stored in separate namespaces.
+    - Searching one scope never returns entries from the other (scope isolation).
+
+- **Session memory (`scope="session"`)**
+  - Typical entries:
+    - `content`: JSON-serialized `ToolOutput` from Story 3.
+    - `metadata`: at least `{"conversation_id": ..., "step": ..., "endpoint": ...}`.
+  - Write path:
+    - After **every tool call completes**, the generator will serialize the tool output and call:
+      - `MemoryStore.add(content=tool_output_json, scope="session", metadata={...})`.
+    - Helper: `add_session_tool_output` encapsulates this convention.
+  - Read path:
+    - Before constructing arguments for any non-first tool call, the Assistant will:
+      - Call `MemoryStore.search(query, scope="session")` (e.g., using endpoint or conversation context).
+      - Inject any retrieved entries into the argument-filling prompt/context.
+
+- **Corpus memory (`scope="corpus"`)**
+  - Typical entries:
+    - `content`: a compact summary string, e.g.  
+      `"Tools: weather_api, maps_api. Domain: travel. Pattern: sequential multi-step."`
+    - `metadata`: at least `{"conversation_id": ..., "tools": [...], "pattern_type": ...}`.
+  - Write path:
+    - After a conversation is fully generated and validated, the generator will:
+      - Build a summary string and call `MemoryStore.add(..., scope="corpus", metadata={...})` (or use `add_corpus_summary`).
+  - Read path:
+    - Before the Planner generates a new conversation plan, it will:
+      - Call `MemoryStore.search(query, scope="corpus")` to retrieve prior summaries.
+      - Use these to diversify or specialise new tool chains and conversation patterns.
+
+- **Metrics and determinism**
+  - For the `memory_grounding_rate` metric and related analyses, a retrieval is considered **present** whenever `search()` for a given scope returns **at least one** result, regardless of internal similarity scores from mem0.
+  - Since mem0 search is approximate, determinism at the pipeline level focuses on:
+    - Using consistent scopes (`"session"`/`"corpus"`) and queries.
+    - Treating non-empty vs empty search results as the key signal, rather than relying on exact ordering or scores.
+
+Future stories will integrate this memory layer with the multi-agent generator and metrics:
+
+- Use session memory for grounding tool arguments within a conversation.
+- Use corpus memory for cross-conversation diversity and planning.
+- Compute `memory_grounding_rate` based on whether non-first tool calls included at least one retrieved memory entry in their argument prompts.
 

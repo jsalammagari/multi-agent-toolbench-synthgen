@@ -60,6 +60,20 @@ An offline executor will be used during conversation generation to:
 
 This executor and the shared conversation models are implemented in `toolbench_synthgen/executor/` and `toolbench_synthgen/models.py` and will be invoked by the multi-agent generator in later stories.
 
+## Agentic Memory
+
+The system uses an agentic memory layer backed by [`mem0`](https://pypi.org/project/mem0ai/) via the `MemoryStore` abstraction:
+
+- `MemoryStore.add(content, scope, metadata)` writes entries to either:
+  - `scope="session"` for per-conversation tool outputs (JSON-serialized), with metadata such as `conversation_id`, `step`, and `endpoint`.
+  - `scope="corpus"` for compact summaries of completed conversations, with metadata such as `conversation_id`, `tools`, and `pattern_type`.
+- `MemoryStore.search(query, scope, top_k)` retrieves relevant entries within the given scope only; `session` and `corpus` memories are isolated.
+
+During generation (later stories):
+
+- Session memory will be written after every tool call and queried before non-first tool calls to ground arguments in prior tool outputs.
+- Corpus memory will be written after each validated conversation and queried by the Planner to diversify or specialise future conversation plans.
+
 ## Project Structure
 
 - `toolbench_synthgen/`
@@ -67,7 +81,7 @@ This executor and the shared conversation models are implemented in `toolbench_s
   - `graph/` – Tool graph representation and constructors built from the registry.
   - `executor/` – Offline tool execution model and argument validation.
   - `agents/` – Multi-agent conversation system (to be implemented).
-  - `memory/` – `MemoryStore` abstraction backed by `mem0` (to be implemented).
+  - `memory/` – `MemoryStore` abstraction backed by `mem0` with session and corpus scopes.
   - `pipeline/` – Orchestration for build / generate / validate / metrics (to be implemented).
   - `cli.py` – CLI entrypoint providing `build`, `generate`, `validate`, and `metrics` commands.
 - `tests/` – Test package, to be populated in later stories.
