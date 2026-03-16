@@ -1,4 +1,10 @@
+import json
+from pathlib import Path
+
 import typer
+
+from toolbench_synthgen.registry import ToolRegistry, load_toolbench_tools
+from toolbench_synthgen.graph import build_tool_graph
 
 
 app = typer.Typer(help="ToolBench-based offline synthetic conversation generator.")
@@ -18,13 +24,40 @@ def build(
     ),
 ) -> None:
     """
-    Build registry / graph / index from ToolBench tool definitions.
-
-    Placeholder implementation; functionality will be added in later stories.
+    Build registry / graph / index from ToolBench tool definitions and write artifacts.
     """
-    typer.echo(
-        f"[build] Not yet implemented. Would ingest tools from '{toolbench_path}' and write artifacts to '{artifacts_dir}'."
-    )
+    try:
+        data = load_toolbench_tools(toolbench_path)
+        registry = ToolRegistry(data)
+    except FileNotFoundError as e:
+        typer.echo(f"[build] Error: {e}")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        typer.echo(f"[build] Failed to load ToolBench tools: {e}")
+        raise typer.Exit(code=1)
+
+    artifacts_root = Path(artifacts_dir)
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+
+    registry_path = artifacts_root / "tool_registry.json"
+    graph_path = artifacts_root / "tool_graph.json"
+
+    registry.save(str(registry_path))
+
+    graph = build_tool_graph(registry)
+    graph.save(str(graph_path))
+
+    num_tools = len(list(registry.tools))
+    num_endpoints = len(list(registry.endpoints))
+
+    summary = {
+        "tools": num_tools,
+        "endpoints": num_endpoints,
+        "registry_path": str(registry_path),
+        "graph_path": str(graph_path),
+    }
+    typer.echo("[build] Completed registry and graph construction:")
+    typer.echo(json.dumps(summary, indent=2))
 
 
 @app.command()

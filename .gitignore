@@ -32,3 +32,6 @@ data/
 
 # Cursor
 .cursor/
+
+artifacts_story2/
+tmp_tools/

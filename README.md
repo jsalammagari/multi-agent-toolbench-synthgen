@@ -14,9 +14,7 @@ pip install -e .
 
 This installs the `toolbench-synthgen` package and exposes the `toolbench-synthgen` CLI.
 
-## CLI Commands (scaffolding only)
-
-All commands are currently placeholders that print a message indicating they were invoked. Later stories will add full functionality.
+## CLI Commands
 
 - Build registry and graph artifacts from ToolBench tools:
 
@@ -42,11 +40,21 @@ toolbench-synthgen validate --input-path data/conversations.jsonl
 toolbench-synthgen metrics --input-path-a data/run_a.jsonl --input-path-b data/run_b.jsonl
 ```
 
-## Project Structure (current scaffolding)
+## Build Inputs and Artifacts
+
+The `build` command expects a directory containing ToolBench-style tool JSON files (for example, files under `ToolBench/data/toolenv/tools`). It:
+
+- Loads and normalizes tool definitions into a **Tool Registry** capturing tools, endpoints, parameters, and basic metadata.
+- Constructs a **Tool Graph** whose nodes include tools, endpoints, parameters, response fields, and concept/tag nodes; edges capture relationships such as `Tool → Endpoint`, `Endpoint → Parameter`, `Endpoint → ResponseField`, and `Concept/Tag ↔ Tool`.
+- Writes both artifacts into the configured `--artifacts-dir` (by default, an `artifacts/` directory).
+
+These artifacts will later be used by the sampler and multi-agent generator to propose realistic multi-step, multi-tool chains during dataset generation.
+
+## Project Structure
 
 - `toolbench_synthgen/`
-  - `registry/` – Tool registry and loaders for ToolBench definitions (to be implemented).
-  - `graph/` – Tool graph representation and samplers (to be implemented).
+  - `registry/` – Tool registry models, loader, and query API for ToolBench definitions.
+  - `graph/` – Tool graph representation and constructors built from the registry.
   - `executor/` – Offline tool execution model (to be implemented).
   - `agents/` – Multi-agent conversation system (to be implemented).
   - `memory/` – `MemoryStore` abstraction backed by `mem0` (to be implemented).
