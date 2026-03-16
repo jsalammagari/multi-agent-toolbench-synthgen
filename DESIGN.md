@@ -279,3 +279,54 @@ Future stories will build on this foundation:
       - `pattern_type`
       - optional `extra` (e.g., validation reasons).
 
+## Validation (Dataset Validator)
+
+The `validate` CLI command runs a **DatasetValidator** over a JSONL dataset of `ConversationRecord`s. The following invariants are checked; violations are aggregated (or, with `--strict`, the run stops on the first failure).
+
+- **Schema validity**  
+  Each line must parse as a valid `ConversationRecord` (Pydantic). Required fields and basic types for messages, tool calls, tool outputs, and metadata are enforced. Invalid lines are counted as schema errors and (in non-strict mode) skipped for downstream checks.
+
+- **Linkage invariants**  
+  Every `ToolOutput.tool_call_id` must equal some `ToolCall.id` in the same record. Step ordering and consistency of `step_index` are implied by the structure. Conversations with orphan outputs are counted as linkage errors.
+
+- **Multi-step requirement**  
+  Each conversation must have **≥ 3 tool calls**. Conversations with fewer are reported as multi-step violations.
+
+- **Multi-tool coverage**  
+  A substantial portion of conversations should use **≥ 2 distinct tools**. Distinct tool IDs are derived from `endpoint_id` (e.g. `tool_id` from `endpoint_id.split(".")[0]`). Conversations with only one tool are reported as multi-tool violations.
+
+- **Clarification behavior**  
+  When `metadata.num_clarification_questions` > 0, the validator requires at least that many **assistant messages without a tool call** (text-only messages) in the conversation. This ensures that where the generator recorded clarifications, the message sequence contains the expected number of clarification turns. Violations are reported as clarification violations.
+
+- **memory_grounding_rate correctness**  
+  For each conversation, the validator recomputes `memory_grounding_rate` from the definition (numerator = number of non-first tool calls whose `arguments` include `from_memory=True`; denominator = total non-first tool calls; value `null` when denominator is zero). The stored value in `metadata` is compared to the recomputed value; mismatches (including `null` vs non-null) are reported as memory_grounding_mismatches.
+
+**Handling of violations**  
+  The validator returns a **ValidationSummary** with total conversations, counts per category (schema_errors, linkage_errors, multi_step_violations, multi_tool_violations, clarification_violations, memory_grounding_mismatches), and optional detail strings. **Passed** counts per category are derived as (eligible − violations), where eligible is (total_conversations − schema_errors). The CLI prints a JSON report and exits with **non-zero status** when there are schema or linkage errors (serious failures); other violations are reported but do not change exit status.
+
+## Metrics & Diversity Analysis
+
+- **Diversity metric: pairwise tool-chain Jaccard dissimilarity**  
+  For each conversation, the **tool-chain set** is the set of tool IDs used in that conversation (from `metadata.tool_ids_used`, or derived from `tool_calls` via `endpoint_id`).  
+  For two conversations with tool sets \( A \) and \( B \), the **Jaccard distance** is:
+  \[
+  d_{\mathrm{Jaccard}}(A, B) = 1 - \frac{|A \cap B|}{|A \cup B|}.
+  \]
+  (If both sets are empty, distance is defined as 0.)  
+  The **corpus diversity** metric is the **average pairwise Jaccard distance** over all pairs of conversations in the dataset. Higher values indicate more diverse tool usage across conversations.
+
+- **memory_grounding_rate statistics**  
+  For each dataset, the metrics pipeline computes:
+  - **Mean, min, max** of `metadata.memory_grounding_rate` over conversations where it is non-null.
+  - A **histogram** over buckets: `0.0`, `(0.0, 0.5]`, `(0.5, 1.0)`, `1.0`.
+
+- **Pattern entropy**  
+  Entropy over `metadata.pattern_type` (or `"unknown"` when null) is computed to capture diversity of conversation patterns (e.g. sequential vs other types).
+
+- **Output**  
+  The `metrics` CLI outputs both **human-readable** summary lines (path, diversity_jaccard, memory_grounding mean/min/max, pattern_entropy) and a **machine-readable** JSON object containing the same information plus the full histogram for each dataset (and, when two paths are given, for both Run A and Run B).
+
+## Corpus Memory & Diversity Analysis
+
+This subsection is the placeholder for **concrete numeric results and a short analysis** of the diversity experiment (Run A: corpus memory disabled vs Run B: corpus memory enabled, same seed and parameters). In a later story, the exact commands will be run, the metrics (diversity Jaccard, memory_grounding_rate stats, pattern entropy) for both runs will be pasted here, and a 3–5 sentence interpretation will be added (e.g. whether corpus memory leads to higher or lower tool-chain diversity and how memory_grounding_rate compares).
+

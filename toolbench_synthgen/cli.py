@@ -1,10 +1,15 @@
 import json
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import typer
 
 from toolbench_synthgen.graph import build_tool_graph
-from toolbench_synthgen.pipeline import generate_dataset
+from toolbench_synthgen.pipeline import (
+    DatasetValidator,
+    MetricsComputer,
+    generate_dataset,
+)
 from toolbench_synthgen.registry import ToolRegistry, load_toolbench_tools
 
 
@@ -131,13 +136,34 @@ def validate(
         "--input-path",
         help="Path to the JSONL dataset to validate.",
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail on first validation error (default: aggregate all).",
+    ),
 ) -> None:
     """
     Validate a generated dataset.
-
-    Placeholder implementation; full validation logic will be added later.
     """
-    typer.echo(f"[validate] Not yet implemented. Would validate dataset at '{input_path}'.")
+    validator = DatasetValidator()
+    summary = validator.validate_dataset(input_path, strict=strict)
+
+    report: Dict[str, Any] = {
+        "total_conversations": summary.total_conversations,
+        "schema": {"passed": summary.schema_passed, "errors": summary.schema_errors},
+        "linkage": {"passed": summary.linkage_passed, "errors": summary.linkage_errors},
+        "multi_step": {"passed": summary.multi_step_passed, "violations": summary.multi_step_violations},
+        "multi_tool": {"passed": summary.multi_tool_passed, "violations": summary.multi_tool_violations},
+        "clarification": {"passed": summary.clarification_passed, "violations": summary.clarification_violations},
+        "memory_grounding": {"passed": summary.memory_grounding_passed, "mismatches": summary.memory_grounding_mismatches},
+    }
+    if summary.details:
+        report["details"] = summary.details
+
+    typer.echo(json.dumps(report, indent=2))
+
+    if summary.has_serious_failures():
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -145,23 +171,63 @@ def metrics(
     input_path_a: str = typer.Option(
         "data/run_a.jsonl",
         "--input-path-a",
-        help="Path to dataset for Run A (e.g., corpus memory disabled).",
+        help="Path to first dataset (e.g., Run A, corpus memory disabled).",
     ),
-    input_path_b: str = typer.Option(
-        "data/run_b.jsonl",
+    input_path_b: Optional[str] = typer.Option(
+        None,
         "--input-path-b",
-        help="Path to dataset for Run B (e.g., corpus memory enabled).",
+        help="Optional second dataset (e.g., Run B, corpus memory enabled).",
     ),
 ) -> None:
     """
     Compute evaluation metrics (including diversity) over one or two datasets.
-
-    Placeholder implementation; metric computation will be added later.
     """
-    typer.echo(
-        "[metrics] Not yet implemented. "
-        f"Would compute metrics for '{input_path_a}' and '{input_path_b}'."
-    )
+    computer = MetricsComputer()
+    result_a = computer.compute_for_dataset(input_path_a)
+
+    output: Dict[str, Any] = {
+        "run_a": {
+            "path": input_path_a,
+            "diversity_jaccard": result_a.diversity_jaccard,
+            "memory_grounding": {
+                "mean": result_a.mgr_mean,
+                "min": result_a.mgr_min,
+                "max": result_a.mgr_max,
+                "histogram": result_a.mgr_histogram,
+            },
+            "pattern_entropy": result_a.pattern_entropy,
+        }
+    }
+
+    # Human-readable summary for Run A
+    typer.echo("[metrics] Run A:")
+    typer.echo(f"  path: {input_path_a}")
+    typer.echo(f"  diversity_jaccard: {result_a.diversity_jaccard:.4f}")
+    typer.echo(f"  memory_grounding: mean={result_a.mgr_mean:.4f} min={result_a.mgr_min:.4f} max={result_a.mgr_max:.4f}")
+    typer.echo(f"  pattern_entropy: {result_a.pattern_entropy:.4f}")
+
+    if input_path_b:
+        result_b = computer.compute_for_dataset(input_path_b)
+        output["run_b"] = {
+            "path": input_path_b,
+            "diversity_jaccard": result_b.diversity_jaccard,
+            "memory_grounding": {
+                "mean": result_b.mgr_mean,
+                "min": result_b.mgr_min,
+                "max": result_b.mgr_max,
+                "histogram": result_b.mgr_histogram,
+            },
+            "pattern_entropy": result_b.pattern_entropy,
+        }
+        typer.echo("[metrics] Run B:")
+        typer.echo(f"  path: {input_path_b}")
+        typer.echo(f"  diversity_jaccard: {result_b.diversity_jaccard:.4f}")
+        typer.echo(f"  memory_grounding: mean={result_b.mgr_mean:.4f} min={result_b.mgr_min:.4f} max={result_b.mgr_max:.4f}")
+        typer.echo(f"  pattern_entropy: {result_b.pattern_entropy:.4f}")
+
+    typer.echo("")
+    typer.echo("[metrics] JSON output:")
+    typer.echo(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":

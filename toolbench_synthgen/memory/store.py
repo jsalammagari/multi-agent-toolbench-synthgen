@@ -1,8 +1,36 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Protocol
 
 from mem0 import Memory
+
+
+class MemoryStoreProtocol(Protocol):
+    """Protocol for add/search memory stores (mem0 or in-memory)."""
+
+    def add(self, content: str, scope: str, metadata: Dict[str, Any]) -> None: ...
+    def search(self, query: str, scope: str, top_k: int = 5) -> List[Dict[str, Any]]: ...
+
+
+class InMemoryStore:
+    """In-memory store with the same add/search interface. No embedder or API key.
+
+    Used when corpus_memory_enabled=False so the pipeline can run without OPENAI_API_KEY.
+    Search returns the most recently added items for the scope (no semantic search).
+    """
+
+    def __init__(self) -> None:
+        # List of (content, scope, metadata); search returns last top_k for scope.
+        self._entries: List[tuple[str, str, Dict[str, Any]]] = []
+
+    def add(self, content: str, scope: str, metadata: Dict[str, Any]) -> None:
+        self._entries.append((content, scope, metadata))
+
+    def search(self, query: str, scope: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        matches = [e for e in self._entries if e[1] == scope]
+        # Return last top_k as dicts for API compatibility.
+        recent = matches[-top_k:] if top_k else []
+        return [{"content": c, "metadata": m} for c, _, m in reversed(recent)]
 
 
 class MemoryStore:
@@ -36,7 +64,7 @@ class MemoryStore:
 
 
 def add_session_tool_output(
-    store: MemoryStore,
+    store: MemoryStoreProtocol,
     conversation_id: str,
     step: int,
     endpoint: str,
@@ -58,7 +86,7 @@ def add_session_tool_output(
 
 
 def add_corpus_summary(
-    store: MemoryStore,
+    store: MemoryStoreProtocol,
     conversation_id: str,
     tools: List[str],
     pattern_type: str,

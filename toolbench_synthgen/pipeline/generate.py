@@ -10,7 +10,8 @@ from toolbench_synthgen.agents import (
 )
 from toolbench_synthgen.executor import OfflineExecutor
 from toolbench_synthgen.graph import ToolGraph
-from toolbench_synthgen.memory import MemoryStore, add_corpus_summary
+from toolbench_synthgen.graph.tool_graph import Edge, Node, NodeType
+from toolbench_synthgen.memory import InMemoryStore, MemoryStore, add_corpus_summary
 from toolbench_synthgen.models import ConversationRecord
 from toolbench_synthgen.registry import ToolRegistry
 
@@ -37,12 +38,19 @@ def generate_dataset(
 
     with Path(graph_path).open("r", encoding="utf-8") as f:
         graph_data = json.load(f)
-    graph = ToolGraph(
-        nodes=[ToolGraph.__annotations__["nodes"].__args__[0](**n) for n in graph_data["nodes"]],
-        edges=[ToolGraph.__annotations__["edges"].__args__[0](**e) for e in graph_data["edges"]],
-    )
+    nodes = [
+        Node(
+            id=n["id"],
+            type=NodeType(n["type"]) if isinstance(n["type"], str) else n["type"],
+            label=n["label"],
+            metadata=n.get("metadata", {}),
+        )
+        for n in graph_data["nodes"]
+    ]
+    edges = [Edge(source=e["source"], target=e["target"], type=e["type"]) for e in graph_data["edges"]]
+    graph = ToolGraph(nodes=nodes, edges=edges)
 
-    memory_store = MemoryStore()
+    memory_store = InMemoryStore() if not corpus_memory_enabled else MemoryStore()
     executor = OfflineExecutor(registry=registry, seed=seed)
 
     output_file = Path(output_path)

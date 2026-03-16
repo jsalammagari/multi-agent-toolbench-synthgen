@@ -123,6 +123,71 @@ toolbench-synthgen generate \
 
 `memory_grounding_rate` reflects how often non-first tool calls were grounded in retrieved session memory (1.0 means all eligible calls were grounded; `null` means there were no non-first tool calls). `corpus_memory_enabled` indicates whether corpus memory was active during that generation run.
 
+## Validating a Dataset (`validate`)
+
+Use `validate` to check structural properties and metadata consistency of a generated dataset:
+
+```bash
+toolbench-synthgen validate --input-path data/conversations.jsonl [--strict]
+```
+
+The command:
+
+- Parses each line as a `ConversationRecord` (schema validity).
+- Checks linkage: every `ToolOutput.tool_call_id` must reference a valid `ToolCall.id`.
+- Verifies multi-step: each conversation has ≥ 3 tool calls.
+- Verifies multi-tool: each conversation uses ≥ 2 distinct tools.
+- Clarification behavior: when `metadata.num_clarification_questions` > 0, requires at least that many assistant messages without a tool call (text-only messages).
+- Recomputes `memory_grounding_rate` and reports mismatches.
+
+Output is a JSON summary with **passed** and **errors/violations** counts per category. Use `--strict` to stop on the first validation failure (default aggregates all). Exits with non-zero status on serious schema or linkage errors.
+
+## Metrics and Diversity Experiment (`metrics`)
+
+Use `metrics` to compute diversity and memory-grounding statistics for one or two datasets:
+
+```bash
+# Single dataset
+toolbench-synthgen metrics --input-path-a data/run_a.jsonl
+
+# Two datasets (e.g. A/B comparison)
+toolbench-synthgen metrics \
+  --input-path-a data/run_a.jsonl \
+  --input-path-b data/run_b.jsonl
+```
+
+`--input-path-b` is optional; when omitted, only the first dataset is computed. Output is both **human-readable** (summary lines) and **machine-readable** (JSON). For each dataset the command reports:
+
+- **Diversity (Jaccard)**: average pairwise Jaccard distance between sets of tools used per conversation.
+- **Memory grounding stats**: mean/min/max of `memory_grounding_rate` and a coarse histogram.
+- **Pattern entropy**: entropy over `pattern_type` labels, indicating pattern diversity.
+
+### Diversity experiment (corpus memory A/B)
+
+To run the required diversity experiment:
+
+```bash
+# Run A: corpus memory disabled
+toolbench-synthgen generate \
+  --output-path data/run_a.jsonl \
+  --num-conversations 100 \
+  --seed 123 \
+  --no-corpus-memory
+
+# Run B: corpus memory enabled
+toolbench-synthgen generate \
+  --output-path data/run_b.jsonl \
+  --num-conversations 100 \
+  --seed 123
+
+# Compare metrics across both runs
+toolbench-synthgen metrics \
+  --input-path-a data/run_a.jsonl \
+  --input-path-b data/run_b.jsonl
+```
+
+This procedure holds the seed and other parameters fixed while flipping only the corpus-memory flag, enabling A/B comparison of tool-chain diversity and memory-grounding behavior.
+
 ## Project Structure
 
 - `toolbench_synthgen/`
@@ -131,7 +196,7 @@ toolbench-synthgen generate \
   - `executor/` – Offline tool execution model and argument validation.
   - `agents/` – Multi-agent conversation system (sampler, planner, user proxy, assistant, validator, and core generator).
   - `memory/` – `MemoryStore` abstraction backed by `mem0` with session and corpus scopes.
-  - `pipeline/` – Orchestration for build / generate / validate / metrics (to be implemented).
+  - `pipeline/` – Orchestration for build, generate, validate, and metrics.
   - `cli.py` – CLI entrypoint providing `build`, `generate`, `validate`, and `metrics` commands.
 - `tests/` – Test package, to be populated in later stories.
 

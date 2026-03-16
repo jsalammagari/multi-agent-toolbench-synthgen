@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from toolbench_synthgen.executor import OfflineExecutor, ValidationError
-from toolbench_synthgen.memory import MemoryStore, add_session_tool_output
+from toolbench_synthgen.memory import MemoryStoreProtocol, add_session_tool_output
 from toolbench_synthgen.models import ConversationRecord, Message, ToolCall, ToolOutput
 from toolbench_synthgen.agents.planner import ConversationPlan, PlanStep
 
@@ -20,7 +20,7 @@ class AssistantAgent:
     def __init__(
         self,
         executor: OfflineExecutor,
-        memory_store: MemoryStore,
+        memory_store: MemoryStoreProtocol,
         config: AssistantConfig,
     ) -> None:
         self.executor = executor

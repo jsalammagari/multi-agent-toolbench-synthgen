@@ -10,7 +10,7 @@ from toolbench_synthgen.agents.user_proxy import UserProxyAgent
 from toolbench_synthgen.agents.validator import ConversationValidatorAgent
 from toolbench_synthgen.executor import OfflineExecutor
 from toolbench_synthgen.graph import ToolGraph
-from toolbench_synthgen.memory import MemoryStore
+from toolbench_synthgen.memory import MemoryStoreProtocol
 from toolbench_synthgen.models import (
     ConversationMetadata,
     ConversationRecord,
@@ -36,7 +36,7 @@ class ConversationGeneratorCore:
         registry: ToolRegistry,
         graph: ToolGraph,
         executor: OfflineExecutor,
-        memory_store: MemoryStore,
+        memory_store: MemoryStoreProtocol,
         config: ConversationGeneratorConfig,
     ) -> None:
         self.registry = registry
