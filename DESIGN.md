@@ -12,7 +12,7 @@ This document outlines the planned architecture for the ToolBench-based offline 
   - `memory` – `MemoryStore` abstraction backed by `mem0` with `session` and `corpus` scopes.
   - `pipeline` – Orchestration for build / generate / validate / metrics commands.
 
-## Current Implementation (Stories 1–5)
+## Current Implementation (Stories 1–6)
 
 - Project is packaged via `pyproject.toml` with an installable `toolbench-synthgen` distribution.
 - Dependencies and development tools are listed in `requirements.txt`.
@@ -229,3 +229,53 @@ Future stories will build on this foundation:
 - **Memory usage**:
   - Session memory (`scope="session"`) is updated after each successful tool call and is intended to be read by future steps for argument grounding.
   - Corpus memory (`scope="corpus"`) is read before planning when enabled and will be written after conversations in the generation pipeline (next stories).
+
+## Generation Pipeline
+
+- **ConversationGeneratorCore vs dataset generation**
+  - `ConversationGeneratorCore` is responsible for generating a **single** `ConversationRecord` given the registry, graph, executor, and memory.
+  - The `generate_dataset` function in `toolbench_synthgen/pipeline/generate.py` builds on this core to:
+    - Load the `ToolRegistry` and `ToolGraph` artifacts produced by the `build` command.
+    - Create a shared `MemoryStore` and `OfflineExecutor`.
+    - Loop over `num_conversations`, instantiating a new `ConversationGeneratorCore` per conversation with a deterministic seed offset (`seed + i`).
+
+- **Session and corpus memory usage during generation**
+  - **Session memory**:
+    - Within each conversation, the executor and assistant:
+      - Write every successful tool output to `scope="session"` with metadata `{"conversation_id", "step", "endpoint"}`.
+      - Query `scope="session"` for non-first tool calls, marking arguments as `from_memory=True` when any entries are retrieved (used later for metrics).
+  - **Corpus memory**:
+    - If `corpus_memory_enabled` is `True` in `ConversationGeneratorConfig`:
+      - Before planning each conversation, the planner receives corpus context from `MemoryStore.search(..., scope="corpus")`.
+      - After a conversation is generated, `generate_dataset` constructs a compact summary string and writes it to `scope="corpus"` via `add_corpus_summary`, with metadata including `conversation_id`, `tools`, and `pattern_type`.
+    - When the CLI flag `--no-corpus-memory` is set, the generator:
+      - Sets `corpus_memory_enabled=False` in configuration.
+      - Skips all corpus-memory reads and writes.
+
+- **memory_grounding_rate computation**
+  - Implemented in `compute_memory_grounding_rate`:
+    - Let `C` be the set of tool calls with `step_index > 0` (non-first calls).
+    - If `C` is empty, `memory_grounding_rate` is set to `null`.
+    - Otherwise:
+      - Numerator: number of calls in `C` whose `arguments` include `from_memory=True`.
+      - Denominator: `len(C)`.
+      - `memory_grounding_rate = numerator / denominator`.
+  - This aligns with the requirement that a retrieval is considered present whenever `search()` returns at least one result and that information has been incorporated into the argument-filling context (signaled here by `from_memory=True`).
+
+- **Dataset output format**
+  - `generate_dataset` writes each `ConversationRecord` as a single JSON line to the configured output path.
+  - Each record contains:
+    - `conversation_id`
+    - `messages`: list of `Message` objects with `role`, `content`, and optional `tool_call_id`.
+    - `tool_calls`: list of `ToolCall` objects with `id`, `endpoint_id`, `arguments`, and `step_index`.
+    - `tool_outputs`: list of `ToolOutput` objects with `id`, `tool_call_id`, `payload`, and `derived_ids`.
+    - `metadata`: `ConversationMetadata` populated with at least:
+      - `seed`
+      - `tool_ids_used`
+      - `num_turns`
+      - `num_clarification_questions`
+      - `memory_grounding_rate`
+      - `corpus_memory_enabled`
+      - `pattern_type`
+      - optional `extra` (e.g., validation reasons).
+

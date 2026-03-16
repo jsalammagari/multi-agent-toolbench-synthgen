@@ -3,8 +3,9 @@ from pathlib import Path
 
 import typer
 
-from toolbench_synthgen.registry import ToolRegistry, load_toolbench_tools
 from toolbench_synthgen.graph import build_tool_graph
+from toolbench_synthgen.pipeline import generate_dataset
+from toolbench_synthgen.registry import ToolRegistry, load_toolbench_tools
 
 
 app = typer.Typer(help="ToolBench-based offline synthetic conversation generator.")
@@ -85,13 +86,41 @@ def generate(
 ) -> None:
     """
     Generate conversations and write them to a JSONL dataset.
-
-    Placeholder implementation; multi-agent generation will be added later.
     """
+    artifacts_root = Path("artifacts")
+    registry_path = artifacts_root / "tool_registry.json"
+    graph_path = artifacts_root / "tool_graph.json"
+
+    if not registry_path.exists() or not graph_path.exists():
+        typer.echo(
+            "[generate] Missing artifacts. Please run 'toolbench-synthgen build' first."
+        )
+        raise typer.Exit(code=1)
+
+    corpus_enabled = not no_corpus_memory
+
     typer.echo(
-        "[generate] Not yet implemented. "
-        f"Would generate {num_conversations} conversations to '{output_path}' "
-        f"with seed={seed}, corpus_memory_enabled={not no_corpus_memory}."
+        f"[generate] Generating {num_conversations} conversations to '{output_path}' "
+        f"with seed={seed}, corpus_memory_enabled={corpus_enabled}."
+    )
+
+    conversations = generate_dataset(
+        registry_path=str(registry_path),
+        graph_path=str(graph_path),
+        output_path=output_path,
+        num_conversations=num_conversations,
+        seed=seed,
+        corpus_memory_enabled=corpus_enabled,
+    )
+
+    typer.echo(
+        json.dumps(
+            {
+                "output_path": output_path,
+                "num_conversations": len(conversations),
+            },
+            indent=2,
+        )
     )
 
 
