@@ -23,7 +23,9 @@ class SamplerAgent:
         self._graph = graph
         self._rng = random.Random(seed)
 
-    def sample_chain(self, min_length: int = 3) -> SampledToolChain:
+    def sample_chain(self, min_length: int = 3, seed: int = None) -> SampledToolChain:
+        if seed is not None:
+            self._rng = random.Random(seed)
         endpoint_nodes = [
             n for n in self._graph.nodes if n.type == NodeType.ENDPOINT
         ]
@@ -52,4 +54,3 @@ class SamplerAgent:
             tools_used=tools_used,
             tags=tags,
         )
-

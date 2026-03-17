@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import List
 
 from .models import Endpoint, Parameter, ResponseField, Tool, ToolRegistryData
+
+logger = logging.getLogger(__name__)
 
 
 def _iter_tool_files(root: Path) -> List[Path]:
@@ -46,12 +49,22 @@ def load_toolbench_tools(root: str) -> ToolRegistryData:
         raise FileNotFoundError(f"ToolBench path '{root}' does not exist or is not a directory.")
 
     tools: List[Tool] = []
+    skipped_files: List[str] = []
     for path in _iter_tool_files(root_path):
         try:
             with path.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except Exception:
-            # Skip files that are not valid JSON or cannot be read
+        except json.JSONDecodeError as e:
+            logger.warning(f"Skipping {path}: Invalid JSON - {e}")
+            skipped_files.append(str(path))
+            continue
+        except PermissionError:
+            logger.warning(f"Skipping {path}: Permission denied")
+            skipped_files.append(str(path))
+            continue
+        except Exception as e:
+            logger.warning(f"Skipping {path}: {type(e).__name__} - {e}")
+            skipped_files.append(str(path))
             continue
 
         tool_name = raw.get("standardized_name") or raw.get("tool_name") or path.stem
@@ -140,5 +153,7 @@ def load_toolbench_tools(root: str) -> ToolRegistryData:
             )
         )
 
-    return ToolRegistryData(tools=tools)
+    if skipped_files:
+        logger.info(f"Skipped {len(skipped_files)} files due to errors")
 
+    return ToolRegistryData(tools=tools)

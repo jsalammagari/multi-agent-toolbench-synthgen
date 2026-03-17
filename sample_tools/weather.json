@@ -1,0 +1,28 @@
+{
+  "tool_description": "Weather and forecast APIs.",
+  "tool_name": "weather",
+  "standardized_name": "weather",
+  "category": "Travel",
+  "api_list": [
+    {
+      "name": "get_forecast",
+      "description": "Get weather forecast for a location.",
+      "required_parameters": [
+        {"name": "location", "type": "string", "description": "City or place name"}
+      ],
+      "optional_parameters": [
+        {"name": "lang", "type": "string", "description": "Language code", "default": "en"}
+      ]
+    },
+    {
+      "name": "get_current",
+      "description": "Get current weather for a location.",
+      "required_parameters": [
+        {"name": "location", "type": "string", "description": "City or place name"}
+      ],
+      "optional_parameters": [
+        {"name": "lang", "type": "string", "description": "Language code", "default": "en"}
+      ]
+    }
+  ]
+}

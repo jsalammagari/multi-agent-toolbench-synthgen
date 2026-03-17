@@ -36,8 +36,8 @@ class PlannerAgent:
         # Very simple diversification: if corpus already contains this pattern_type + domain,
         # prefer mentioning that we explore a slightly different variant in the goal text.
         seen_patterns = {
-            (s.get("pattern_type"), s.get("domain"))
-            for s in (summary.get("metadata", {}) for summary in corpus_summaries)
+            (s.get("metadata", {}).get("pattern_type"), s.get("metadata", {}).get("domain"))
+            for s in corpus_summaries
         }
         pattern_key = (chain.pattern_type, domain)
         diversified = pattern_key in seen_patterns
@@ -55,4 +55,3 @@ class PlannerAgent:
             steps.append(PlanStep(kind="tool_call", endpoint_id=endpoint_id))
 
         return ConversationPlan(goal=goal, domain=domain, steps=steps)
-

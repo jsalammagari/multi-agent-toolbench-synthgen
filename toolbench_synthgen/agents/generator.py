@@ -60,7 +60,7 @@ class ConversationGeneratorCore:
             else []
         )
 
-        chain = self.sampler.sample_chain(min_length=3)
+        chain = self.sampler.sample_chain(min_length=3, seed=self.config.seed)
         plan = self.planner.plan(chain, corpus_summaries=corpus_context)
 
         messages: List[Message] = []
@@ -130,4 +130,3 @@ class ConversationGeneratorCore:
             convo.metadata.extra["validation_reasons"] = result.reasons
 
         return convo
-
