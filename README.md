@@ -2,6 +2,16 @@
 
 An offline multi-agent conversation generator that produces multi-turn, multi-step, multi-tool tool-use traces grounded in tool schemas from ToolBench.
 
+## Features
+
+- **Tool Registry**: Loads and normalizes ToolBench tool definitions with robust error handling
+- **Tool Graph**: Constructs a graph capturing tools, endpoints, parameters, and semantic groupings
+- **Multi-Agent System**: Five specialized agents (Sampler, Planner, UserProxy, Assistant, Validator) collaborate to generate conversations
+- **Agentic Memory**: Session and corpus memory backed by mem0 for context-aware generation
+- **Deterministic Generation**: Seed-based reproducibility for all outputs
+- **Comprehensive Validation**: Schema, linkage, multi-step, and multi-tool validation
+- **Diversity Metrics**: Jaccard dissimilarity, memory grounding rate, and pattern entropy
+
 ## Installation
 
 1. Create and activate a Python virtual environment (Python 3.10+).
@@ -14,191 +24,247 @@ pip install -e .
 
 This installs the `toolbench-synthgen` package and exposes the `toolbench-synthgen` CLI.
 
+## Quick Start
+
+```bash
+# 1. Build registry and graph from ToolBench tools
+toolbench-synthgen build \
+  --toolbench-path /path/to/ToolBench/data/toolenv/tools \
+  --artifacts-dir artifacts
+
+# 2. Generate conversations
+toolbench-synthgen generate \
+  --output-path data/conversations.jsonl \
+  --num-conversations 50 \
+  --seed 42
+
+# 3. Validate the dataset
+toolbench-synthgen validate --input-path data/conversations.jsonl
+
+# 4. Compute metrics
+toolbench-synthgen metrics --input-path-a data/conversations.jsonl
+```
+
 ## CLI Commands
 
-- Build registry and graph artifacts from ToolBench tools:
+### `build` - Build Registry and Graph
 
 ```bash
-toolbench-synthgen build --toolbench-path /path/to/ToolBench/data/toolenv/tools --artifacts-dir artifacts
+toolbench-synthgen build \
+  --toolbench-path /path/to/ToolBench/data/toolenv/tools \
+  --artifacts-dir artifacts
 ```
 
-- Generate conversations into a JSONL dataset:
+Loads ToolBench tool definitions and creates:
+- `tool_registry.json`: Normalized tool definitions with endpoints, parameters, and metadata
+- `tool_graph.json`: Graph with tool, endpoint, parameter, response_field, and concept nodes
 
-```bash
-toolbench-synthgen generate --output-path data/conversations.jsonl --num-conversations 10 --seed 42
-```
+The loader handles missing/inconsistent fields gracefully and logs skipped files.
 
-- Validate a generated dataset:
-
-```bash
-toolbench-synthgen validate --input-path data/conversations.jsonl
-```
-
-- Compute metrics over one or two datasets:
-
-```bash
-toolbench-synthgen metrics --input-path-a data/run_a.jsonl --input-path-b data/run_b.jsonl
-```
-
-## Build Inputs and Artifacts
-
-The `build` command expects a directory containing ToolBench-style tool JSON files (for example, files under `ToolBench/data/toolenv/tools`). It:
-
-- Loads and normalizes tool definitions into a **Tool Registry** capturing tools, endpoints, parameters, and basic metadata.
-- Constructs a **Tool Graph** whose nodes include tools, endpoints, parameters, response fields, and concept/tag nodes; edges capture relationships such as `Tool → Endpoint`, `Endpoint → Parameter`, `Endpoint → ResponseField`, and `Concept/Tag ↔ Tool`.
-- Writes both artifacts into the configured `--artifacts-dir` (by default, an `artifacts/` directory).
-
-These artifacts will later be used by the sampler and multi-agent generator to propose realistic multi-step, multi-tool chains during dataset generation.
-
-## Offline Executor
-
-An offline executor will be used during conversation generation to:
-
-- Validate tool-call arguments against endpoint schemas from the Tool Registry.
-- Generate deterministic mock responses (no real API calls) that are structurally consistent and chainable.
-- Maintain a lightweight session state, so later tool calls can reference IDs or results produced earlier in the conversation.
-
-This executor and the shared conversation models are implemented in `toolbench_synthgen/executor/` and `toolbench_synthgen/models.py` and will be invoked by the multi-agent generator in later stories.
-
-## Agentic Memory
-
-The system uses an agentic memory layer backed by [`mem0`](https://pypi.org/project/mem0ai/) via the `MemoryStore` abstraction:
-
-- `MemoryStore.add(content, scope, metadata)` writes entries to either:
-  - `scope="session"` for per-conversation tool outputs (JSON-serialized), with metadata such as `conversation_id`, `step`, and `endpoint`.
-  - `scope="corpus"` for compact summaries of completed conversations, with metadata such as `conversation_id`, `tools`, and `pattern_type`.
-- `MemoryStore.search(query, scope, top_k)` retrieves relevant entries within the given scope only; `session` and `corpus` memories are isolated.
-
-During generation (later stories):
-
-- Session memory will be written after every tool call and queried before non-first tool calls to ground arguments in prior tool outputs.
-- Corpus memory will be written after each validated conversation and queried by the Planner to diversify or specialise future conversation plans.
-
-## Multi-Agent Conversation Generation
-
-Conversations are generated by a small multi-agent system that builds on the registry, graph, executor, and memory:
-
-- **SamplerAgent** uses the Tool Graph to sample candidate tool chains (multi-step, multi-tool) and annotate them with a pattern type.
-- **PlannerAgent** turns a sampled chain and optional corpus memory context into a high-level conversation plan: user goal, ordered tool-call steps, and where clarifications are needed.
-- **UserProxyAgent** simulates the user:
-  - Produces the initial request aligned with the plan’s goal/domain.
-  - Answers assistant clarifying questions with follow-up user messages.
-- **AssistantAgent**:
-  - Decides at each step whether to ask a clarification or issue a tool call.
-  - Uses the OfflineExecutor to run tool calls and writes outputs into session memory via `MemoryStore`.
-  - Sends natural-language responses back to the user describing tool results.
-- **ConversationValidatorAgent** performs basic structural checks (e.g., multi-step/multi-tool constraints) on the final `ConversationRecord`.
-- **ConversationGeneratorCore** orchestrates these agents to produce a single validated conversation that will later be written into the JSONL dataset.
-
-## Generating a Dataset (`generate`)
-
-The `generate` command runs the full multi-agent pipeline and writes a JSONL dataset:
+### `generate` - Generate Conversations
 
 ```bash
 toolbench-synthgen generate \
   --output-path data/conversations.jsonl \
   --num-conversations 100 \
-  --seed 123 \
+  --seed 42 \
   [--no-corpus-memory]
 ```
 
-- **Inputs**:
-  - Requires that `toolbench-synthgen build` has already produced `artifacts/tool_registry.json` and `artifacts/tool_graph.json`.
-  - `--seed` controls all sampling and mock responses for reproducible generation.
-  - `--no-corpus-memory` disables reading/writing corpus-level memory while leaving session memory enabled.
-- **Outputs**:
-  - A JSONL file where each line is a serialized `ConversationRecord` containing:
-    - `conversation_id`
-    - `messages` (user, assistant, tool; including clarifications)
-    - `tool_calls` (endpoint id + argument dict)
-    - `tool_outputs` (mocked, deterministic, chain-consistent)
-    - `metadata` with at least:
-      - `seed`
-      - `tool_ids_used`
-      - `num_turns`
-      - `num_clarification_questions`
-      - `memory_grounding_rate`
-      - `corpus_memory_enabled`
-      - `pattern_type`
+**Options:**
+- `--output-path`: Path to output JSONL file (default: `data/conversations.jsonl`)
+- `--num-conversations`: Number of conversations to generate (default: 10)
+- `--seed`: Random seed for deterministic generation (default: 42)
+- `--no-corpus-memory`: Disable corpus-level memory (session memory remains active)
 
-`memory_grounding_rate` reflects how often non-first tool calls were grounded in retrieved session memory (1.0 means all eligible calls were grounded; `null` means there were no non-first tool calls). `corpus_memory_enabled` indicates whether corpus memory was active during that generation run.
+**Output Format (JSONL):**
+Each line is a JSON object with:
+- `conversation_id`: Unique identifier
+- `messages`: List of role-tagged messages (user, assistant, tool)
+- `tool_calls`: List of tool calls with endpoint_id, arguments, step_index
+- `tool_outputs`: Mocked responses with payload and derived_ids
+- `metadata`: seed, tool_ids_used, num_turns, num_clarification_questions, memory_grounding_rate, corpus_memory_enabled, pattern_type
 
-## Validating a Dataset (`validate`)
-
-Use `validate` to check structural properties and metadata consistency of a generated dataset:
+### `validate` - Validate Dataset
 
 ```bash
-toolbench-synthgen validate --input-path data/conversations.jsonl [--strict]
+toolbench-synthgen validate \
+  --input-path data/conversations.jsonl \
+  [--strict]
 ```
 
-The command:
+Checks:
+- **Schema validity**: Each line parses as valid ConversationRecord
+- **Linkage**: Every ToolOutput.tool_call_id references a valid ToolCall.id
+- **Multi-step**: Each conversation has ≥3 tool calls
+- **Multi-tool**: Each conversation uses ≥2 distinct tools
+- **Clarifications**: Assistant clarification messages match metadata count
+- **Memory grounding rate**: Recomputes and verifies stored value
 
-- Parses each line as a `ConversationRecord` (schema validity).
-- Checks linkage: every `ToolOutput.tool_call_id` must reference a valid `ToolCall.id`.
-- Verifies multi-step: each conversation has ≥ 3 tool calls.
-- Verifies multi-tool: each conversation uses ≥ 2 distinct tools.
-- Clarification behavior: when `metadata.num_clarification_questions` > 0, requires at least that many assistant messages without a tool call (text-only messages).
-- Recomputes `memory_grounding_rate` and reports mismatches.
+Use `--strict` to stop on first error. Exits with non-zero status on schema/linkage errors.
 
-Output is a JSON summary with **passed** and **errors/violations** counts per category. Use `--strict` to stop on the first validation failure (default aggregates all). Exits with non-zero status on serious schema or linkage errors.
-
-## Metrics and Diversity Experiment (`metrics`)
-
-Use `metrics` to compute diversity and memory-grounding statistics for one or two datasets:
+### `metrics` - Compute Metrics
 
 ```bash
 # Single dataset
 toolbench-synthgen metrics --input-path-a data/run_a.jsonl
 
-# Two datasets (e.g. A/B comparison)
+# Compare two datasets (A/B test)
 toolbench-synthgen metrics \
   --input-path-a data/run_a.jsonl \
   --input-path-b data/run_b.jsonl
 ```
 
-`--input-path-b` is optional; when omitted, only the first dataset is computed. Output is both **human-readable** (summary lines) and **machine-readable** (JSON). For each dataset the command reports:
+Reports:
+- **Diversity (Jaccard)**: Average pairwise Jaccard distance between tool sets
+- **Memory Grounding Rate**: Mean/min/max and histogram
+- **Pattern Entropy**: Diversity of conversation patterns
 
-- **Diversity (Jaccard)**: average pairwise Jaccard distance between sets of tools used per conversation.
-- **Memory grounding stats**: mean/min/max of `memory_grounding_rate` and a coarse histogram.
-- **Pattern entropy**: entropy over `pattern_type` labels, indicating pattern diversity.
+## Diversity Experiment
 
-### Diversity experiment (corpus memory A/B)
-
-To run the required diversity experiment:
+To compare corpus memory impact on diversity:
 
 ```bash
 # Run A: corpus memory disabled
 toolbench-synthgen generate \
   --output-path data/run_a.jsonl \
   --num-conversations 100 \
-  --seed 123 \
+  --seed 42 \
   --no-corpus-memory
 
 # Run B: corpus memory enabled
 toolbench-synthgen generate \
   --output-path data/run_b.jsonl \
   --num-conversations 100 \
-  --seed 123
+  --seed 42
 
-# Compare metrics across both runs
+# Compare metrics
 toolbench-synthgen metrics \
   --input-path-a data/run_a.jsonl \
   --input-path-b data/run_b.jsonl
 ```
 
-This procedure holds the seed and other parameters fixed while flipping only the corpus-memory flag, enabling A/B comparison of tool-chain diversity and memory-grounding behavior.
-
 ## Project Structure
 
-- `toolbench_synthgen/`
-  - `registry/` – Tool registry models, loader, and query API for ToolBench definitions.
-  - `graph/` – Tool graph representation and constructors built from the registry.
-  - `executor/` – Offline tool execution model and argument validation.
-  - `agents/` – Multi-agent conversation system (sampler, planner, user proxy, assistant, validator, and core generator).
-  - `memory/` – `MemoryStore` abstraction backed by `mem0` with session and corpus scopes.
-  - `pipeline/` – Orchestration for build, generate, validate, and metrics.
-  - `cli.py` – CLI entrypoint providing `build`, `generate`, `validate`, and `metrics` commands.
-- `tests/` – Test package, to be populated in later stories.
+```
+toolbench_synthgen/
+├── __init__.py
+├── cli.py                 # CLI entrypoint (build, generate, validate, metrics)
+├── models.py              # Pydantic models (Message, ToolCall, ToolOutput, etc.)
+├── registry/              # Tool registry and ToolBench loader
+│   ├── __init__.py
+│   ├── loader.py          # load_toolbench_tools() with error handling
+│   ├── models.py          # Tool, Endpoint, Parameter, ResponseField
+│   └── registry.py        # ToolRegistry class
+├── graph/                 # Tool graph construction
+│   ├── __init__.py
+│   └── tool_graph.py      # ToolGraph, build_tool_graph()
+├── executor/              # Offline tool execution
+│   ├── __init__.py
+│   └── offline.py         # OfflineExecutor with validation
+├── agents/                # Multi-agent system
+│   ├── __init__.py
+│   ├── sampler.py         # SamplerAgent - proposes tool chains
+│   ├── planner.py         # PlannerAgent - creates conversation plans
+│   ├── user_proxy.py      # UserProxyAgent - simulates user
+│   ├── assistant.py       # AssistantAgent - tool calls & clarifications
+│   ├── validator.py       # ConversationValidatorAgent
+│   └── generator.py       # ConversationGeneratorCore orchestrator
+├── memory/                # Agentic memory layer
+│   ├── __init__.py
+│   └── store.py           # MemoryStore (mem0) and InMemoryStore
+└── pipeline/              # Pipeline orchestration
+    ├── __init__.py
+    ├── generate.py        # generate_dataset()
+    ├── validate.py        # DatasetValidator
+    └── metrics.py         # MetricsComputer
 
-Each subsequent story will extend this scaffolding and update the documentation to describe newly implemented functionality.
+tests/                     # Test suite
+├── __init__.py
+├── conftest.py            # Shared pytest fixtures
+├── test_registry.py       # Unit tests for parsing/validation
+├── test_memory.py         # Unit tests for MemoryStore
+└── test_e2e.py            # End-to-end tests (≥50 samples)
 
+artifacts/                 # Pre-built artifacts (generated by build command)
+├── tool_registry.json     # Normalized tool definitions
+└── tool_graph.json        # Tool relationship graph
+```
+
+## Testing
+
+Run the full test suite:
+
+```bash
+pytest tests/ -v
+```
+
+Run specific test categories:
+
+```bash
+# Unit tests for registry parsing/validation
+pytest tests/test_registry.py -v
+
+# Unit tests for MemoryStore (add→search, scope isolation)
+pytest tests/test_memory.py -v
+
+# End-to-end tests (generates ≥50 samples)
+pytest tests/test_e2e.py -v
+```
+
+### Test Coverage
+
+- **Registry Tests**: Parsing valid/invalid JSON, missing fields, parameter extraction, enum constraints
+- **Memory Tests**: Add/search functionality, scope isolation (session vs corpus), helper functions
+- **E2E Tests**: Full pipeline from build to validate, determinism verification, output format compliance
+
+## Architecture
+
+### Multi-Agent System
+
+1. **SamplerAgent**: Samples tool chains from the Tool Graph (min 3 endpoints)
+2. **PlannerAgent**: Creates conversation plans with goals, domains, and step sequences
+3. **UserProxyAgent**: Generates user messages and answers clarification questions
+4. **AssistantAgent**: Executes tool calls, queries memory, emits responses
+5. **ConversationValidatorAgent**: Validates structural properties
+
+### Memory System
+
+- **Session Memory** (`scope="session"`): Per-conversation tool outputs for argument grounding
+- **Corpus Memory** (`scope="corpus"`): Cross-conversation summaries for diversity
+
+### Data Flow
+
+```
+ToolBench JSON → Registry → Graph → Sampler → Planner → Generator → JSONL
+                                      ↑                      ↓
+                                 Corpus Memory ←────── Corpus Summary
+```
+
+## Configuration
+
+**No external API keys are required for basic functionality.** The MemoryStore automatically
+falls back to an InMemoryStore (recency-based retrieval) when mem0's semantic search
+cannot be initialized.
+
+For full semantic search capabilities with mem0:
+- Set `OPENAI_API_KEY` environment variable, OR
+- Configure Ollama for local LLM inference
+
+The assessment specifies: "mem0 defaults to an in-process vector store (Qdrant embedded).
+No external service is required for the exercise." The fallback ensures the pipeline works
+without any external services while still meeting the MemoryStore interface requirements.
+
+## Requirements
+
+- Python 3.10+
+- typer >= 0.12.0
+- mem0ai >= 0.0.8
+- pydantic >= 2.7.0
+- networkx >= 3.2.0
+- sentence-transformers >= 2.2.0 (for local embeddings when mem0 is available)
+- pytest >= 8.0.0 (dev)
+
+## License
+
+See LICENSE file for details.

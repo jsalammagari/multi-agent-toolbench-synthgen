@@ -1,6 +1,6 @@
 """Agents package for sampler, planner, user-proxy, assistant, and validator agents."""
 
-from .sampler import SamplerAgent, SampledToolChain
+from .sampler import SamplerAgent, SampledToolChain, PatternType
 from .planner import PlannerAgent, ConversationPlan, PlanStep
 from .user_proxy import UserProxyAgent
 from .assistant import AssistantAgent, AssistantConfig
@@ -10,6 +10,7 @@ from .generator import ConversationGeneratorCore, ConversationGeneratorConfig
 __all__ = [
     "SamplerAgent",
     "SampledToolChain",
+    "PatternType",
     "PlannerAgent",
     "ConversationPlan",
     "PlanStep",
