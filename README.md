@@ -144,6 +144,12 @@ toolbench-synthgen metrics \
   --input-path-b data/run_b.jsonl
 ```
 
+## Demo & Results
+
+- Video demo: [Multi-Agent ToolBench SynthGen (YouTube)](https://www.youtube.com/watch?v=7Rk2B012Too)
+- `run_a.jsonl` results (corpus memory disabled): [Download](https://drive.google.com/file/d/1vYXV5hqRiaYfrBXueUpW4uG-SyoqUIIX/view?usp=sharing)
+- `run_b.jsonl` results (corpus memory enabled): [Download](https://drive.google.com/file/d/13KE8vdDkVhoTbezU1rfN8SMdr1itNo8K/view?usp=sharing)
+
 ## Project Structure
 
 ```
